@@ -1,4 +1,4 @@
 streamlit
 PyMuPDF
-docx
 requests
+python-docx
