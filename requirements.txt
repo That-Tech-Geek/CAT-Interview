@@ -1,4 +1,4 @@
 streamlit
-fitz
+PyMuPDF
 docx
 requests
