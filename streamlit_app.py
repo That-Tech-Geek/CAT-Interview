@@ -1,56 +1,94 @@
 import streamlit as st
-from openai import OpenAI
+import fitz  # PyMuPDF for PDF text extraction
+import docx  # for docx file reading
+import requests  # for calling the LLaMA API
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Function to extract text from PDF
+def extract_text_from_pdf(pdf_file):
+    with fitz.open(pdf_file) as doc:
+        text = ""
+        for page in doc:
+            text += page.get_text()
+    return text
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Function to extract text from Word document
+def extract_text_from_docx(docx_file):
+    doc = docx.Document(docx_file)
+    text = ""
+    for para in doc.paragraphs:
+        text += para.text + '\n'
+    return text
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Function to generate chatbot responses from LLaMA
+def get_llama_response(user_input, cv_text, conversation_history):
+    url = "https://your-llama-api-endpoint.com/v1/generate"  # Replace with actual LLaMA API endpoint
+    headers = {
+        "Authorization": "Bearer YOUR_API_KEY",  # Replace with your LLaMA API key if needed
+        "Content-Type": "application/json"
+    }
+    
+    # Creating the payload with CV text, previous conversation, and user query
+    prompt = f"Based on the following CV details: {cv_text}\n\nInterview conversation history: {conversation_history}\n\nNext Question:"
+    payload = {
+        "input": prompt,
+        "parameters": {
+            "max_tokens": 150,
+            "temperature": 0.7
+        }
+    }
+    
+    # Sending request to the LLaMA API
+    response = requests.post(url, json=payload, headers=headers)
+    
+    # Handling response from LLaMA
+    if response.status_code == 200:
+        response_data = response.json()
+        return response_data.get('generated_text', 'No response from LLaMA')
+    else:
+        return "Error in fetching response from LLaMA."
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Streamlit app setup
+st.title("CV-based Full-Fledged Interview Chatbot")
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# Allow user to upload CV
+uploaded_file = st.file_uploader("Upload your CV (PDF or DOCX)", type=["pdf", "docx"])
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+if uploaded_file:
+    # Extract text from the uploaded file
+    if uploaded_file.type == "application/pdf":
+        cv_text = extract_text_from_pdf(uploaded_file)
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        cv_text = extract_text_from_docx(uploaded_file)
+    
+    st.write("CV Text Extracted Successfully!")
+    
+    # Initialize session state for conversation history if not already present
+    if 'conversation_history' not in st.session_state:
+        st.session_state.conversation_history = ""
+    
+    # Show extracted CV text (optional, you can choose to hide it)
+    st.write("### Extracted CV Text:")
+    st.text_area("CV Text", value=cv_text, height=200, disabled=True)
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Start Interview
+    st.write("### Interview Started")
+    st.write("The bot will now ask you a series of questions based on your CV. Respond to each question.")
+    
+    # Chatbot conversation loop
+    user_input = st.text_input("Your Answer:")
+    
+    if user_input:
+        # Append the user's answer to the conversation history
+        st.session_state.conversation_history += f"\nUser: {user_input}"
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Get the chatbot's response based on conversation history and CV
+        chatbot_response = get_llama_response(user_input, cv_text, st.session_state.conversation_history)
+        
+        # Show chatbot response
+        st.session_state.conversation_history += f"\nChatbot: {chatbot_response}"
+        
+        st.write(f"**Chatbot's Question:** {chatbot_response}")
+    
+    # Show the ongoing conversation history
+    st.write("### Interview History:")
+    st.text_area("Conversation", value=st.session_state.conversation_history, height=300, disabled=True)
